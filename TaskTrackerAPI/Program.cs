@@ -1,7 +1,18 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using TaskTrackerAPI.Data;
+using Task = TaskTrackerAPI.Data.Models.Task;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+builder.Services.AddDbContext<DataContext>(options => 
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddCors(options => options.AddPolicy(name: "TaskOrigins", policy =>
+{
+    policy.WithOrigins("http://localhost:4200").AllowAnyMethod().AllowAnyHeader().AllowAnyOrigin();
+}));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -9,35 +20,54 @@ var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
-{
+{ 
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
 app.UseHttpsRedirection();
+app.UseCors("TaskOrigins");
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+app.MapGet("/tasks", async (DataContext context) =>
+    await context.Tasks.ToListAsync());
 
-app.MapGet("/weatherforecast", () =>
+app.MapPost("/tasks", async (DataContext context, Task taskInput) =>
 {
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateTime.Now.AddDays(index),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    Task task = new Task
+    {
+        Text = taskInput.Text,
+        Day = taskInput.Day,
+        Reminder = taskInput.Reminder
+    };
+
+    await context.Tasks.AddAsync(task);
+    await context.SaveChangesAsync();
+    return Results.Ok(taskInput);
+});
+
+app.MapPut("/tasks/{id}", async (DataContext context, Task taskInput, int id) =>
+{
+    var task = await context.Tasks.FindAsync(id);
+    if (task == null)
+    {
+        return Results.NotFound();
+    }
+    task.Reminder = taskInput.Reminder;
+    await context.SaveChangesAsync();
+    return Results.Ok(task);
+});
+
+app.MapDelete("/tasks/{id}", async (DataContext context, int id) =>
+{
+    var task = await context.Tasks.FindAsync(id);
+    if(task == null)
+    {
+        return Results.NotFound();
+    }
+    context.Tasks.Remove(task);
+    await context.SaveChangesAsync();
+    return Results.Ok(task);
+});
+
 
 app.Run();
-
-internal record WeatherForecast(DateTime Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
